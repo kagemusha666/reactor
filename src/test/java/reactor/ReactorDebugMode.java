@@ -27,24 +27,17 @@
 
 package reactor;
 
-import lombok.AllArgsConstructor;
-import lombok.Value;
+import org.junit.jupiter.api.BeforeAll;
+import reactor.core.publisher.Hooks;
 
 /**
- * Data conversion.
+ * Start debug mode.
  */
-@Value
-@AllArgsConstructor
-public class Client {
-    String firstName;
-    String lastName;
+public interface ReactorDebugMode {
 
-    boolean isNull() {
-        return firstName == null && lastName == null;
-    }
-
-    static Client NullClient() {
-        return new Client(null, null);
+    @BeforeAll
+    static void startDebugMode() {
+        Hooks.onOperatorDebug();
     }
 
 }

@@ -46,7 +46,7 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class Database {
 
-    static final int KEEP_ALIVE_CONNECTIONS = 4;
+    static final int KEEP_ALIVE_CONNECTIONS = 2;
     static final int CONNECTION_TIMEOUT = 3; // seconds
 
     private final Semaphore establishedConnectionSemaphore = new Semaphore(KEEP_ALIVE_CONNECTIONS);
@@ -68,14 +68,15 @@ public class Database {
     public Mono<Connection> getConnection() {
         return obtainConnectionNonBlocking()
                 .switchIfEmpty(obtainConnectionBlocking())
+                //.flatMap(c -> Mono.just(c.beginTransaction()).<Connection>then(c))
                 .doOnNext(this::releaseConnection);
     }
 
 
     private Mono<Connection> obtainConnectionNonBlocking() {
-        log.warn("try obtain connection...");
+        //log.warn("try obtain connection...");
         if (establishedConnectionSemaphore.tryAcquire()) {
-            log.warn("connection acquired at once");
+            //log.warn("connection acquired at once");
             return Mono.justOrEmpty(establishedConnectionPool.poll())
                     .switchIfEmpty(Mono.from(connectionFactory.create()));
         } else {
@@ -107,7 +108,7 @@ public class Database {
     private void releaseConnection(Connection connection) {
         establishedConnectionPool.offer(connection);
         establishedConnectionSemaphore.release();
-        log.warn("connection released");
+        //log.warn("connection released");
     }
 
 }

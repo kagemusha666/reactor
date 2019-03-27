@@ -50,6 +50,7 @@ public class Endpoint
         var service = new Service(database);
 
         var route = route()
+                .GET("/client/all", service::getAllClients)
                 .GET("/client/{id}", service::getClient)
                 .build();
 
@@ -59,9 +60,10 @@ public class Endpoint
         log.warn("starting server...");
 
         HttpServer.create()
+                .host("0.0.0.0")
                 .port(8080)
                 .handle(adapter)
-                .wiretap(true)
+                .wiretap()
                 .bindUntilJavaShutdown(Duration.ZERO, s -> log.warn("server started..."));
     }
 

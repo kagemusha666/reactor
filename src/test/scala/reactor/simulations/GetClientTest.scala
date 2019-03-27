@@ -25,26 +25,48 @@
  * For more information, please refer to <http://unlicense.org>
  */
 
-package reactor;
+package reactor.simulations
 
-import lombok.AllArgsConstructor;
-import lombok.Value;
+import io.gatling.core.Predef._
+import io.gatling.core.structure.{ChainBuilder, ScenarioBuilder}
+import io.gatling.http.Predef._
+import io.gatling.http.protocol.HttpProtocolBuilder
 
-/**
- * Data conversion.
- */
-@Value
-@AllArgsConstructor
-public class Client {
-    String firstName;
-    String lastName;
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
-    boolean isNull() {
-        return firstName == null && lastName == null;
-    }
 
-    static Client NullClient() {
-        return new Client(null, null);
-    }
+object Scenario {
 
+  val clientId = Iterator.continually(Map("id" -> "2222"))
+
+  val doGetClient: ChainBuilder =
+    feed(clientId)
+      .group("Client") {
+        exec(
+          http("ClientRequest")
+            .get("/client/" + "${id}")
+            .check(status.is(200))
+        )
+      }
+
+  val httpConf: HttpProtocolBuilder = http
+    .baseUrl("http://0.0.0.0:8080")
+    .header(HttpHeaderNames.ContentType, HttpHeaderValues.ApplicationJson)
+
+  def getClientScn(loopCount: Int = 1): ScenarioBuilder = scenario("DoRequestClient")
+    .repeat(loopCount)(doGetClient)
+}
+
+class ProcessPurchaseTest extends Simulation {
+
+  private val injectionSteps = Seq(
+    constantUsersPerSec(100) during (60 seconds)
+  )
+
+  private val assertions = Seq(
+    details("Client").responseTime.max.lt(6000),
+  )
+
+  setUp(Scenario.getClientScn().inject(injectionSteps).protocols(Scenario.httpConf)).assertions(assertions)
 }

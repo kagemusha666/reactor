@@ -31,8 +31,10 @@ import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import java.util.concurrent.TimeoutException;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
@@ -41,6 +43,7 @@ import reactor.core.publisher.Mono;
  * Router handler.
  */
 @AllArgsConstructor
+@Slf4j
 public class Service {
 
     private final Database database;
@@ -57,7 +60,7 @@ public class Service {
                 .flatMap(result -> result.map(Service::mapper))
                 .singleOrEmpty();
 
-        return client.flatMap(result -> ServerResponse.ok()
+        return client.flatMap(data -> ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(client, Client.class))
                 .switchIfEmpty(ServerResponse.noContent().build())
@@ -67,8 +70,26 @@ public class Service {
 
 
     private static Client mapper(Row row, RowMetadata meta) {
-        return new Client(row.get("firstname", String.class),
-                row.get("lastname", String.class));
+        try {
+            return new Client(row.get("firstname", String.class),
+                    row.get("lastname", String.class));
+        } catch (Exception e) {
+            log.error("{}", e);
+            return Client.NullClient();
+        }
+    }
+
+    public Mono<ServerResponse> getAllClients(ServerRequest request) {
+        var clients = database.getConnection()
+                .switchIfEmpty(Mono.error(IllegalArgumentException::new))
+                .flatMapMany(conn -> conn.createStatement("SELECT firstname, lastname FROM card_clients")
+                        .execute())
+                .flatMap(result -> result.map(Service::mapper))
+                .filter(Client::isNull);
+
+        return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_STREAM_JSON)
+                .body(BodyInserters.fromPublisher(clients, Client.class));
     }
 
 }
