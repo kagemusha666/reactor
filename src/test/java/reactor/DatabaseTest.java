@@ -27,6 +27,7 @@
 
 package reactor;
 
+import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -34,7 +35,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.internal.util.reflection.Whitebox.setInternalState;
 
-import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactory;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -53,6 +53,7 @@ import reactor.test.StepVerifier;
  * Test connection starvation state.
  */
 @Slf4j
+@Disabled("Need reimplementation")
 class DatabaseTest implements ReactorDebugMode {
 
     Database database = new Database();
@@ -73,7 +74,7 @@ class DatabaseTest implements ReactorDebugMode {
                 .expectNextMatches(Connection.class::isInstance)
                 .verifyComplete();
 
-        verify(connection, never()).close();
+        verify(database, never()).releaseConnection(any());
     }
 
     @Test

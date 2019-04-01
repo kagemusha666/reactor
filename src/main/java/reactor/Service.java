@@ -54,15 +54,15 @@ public class Service {
 
         var client = database.getConnection()
                 .switchIfEmpty(Mono.error(IllegalArgumentException::new))
-                .flatMapMany(conn -> conn.createStatement("SELECT firstname, lastname FROM card_clients WHERE guid = $1")
-                        .bind("$1", id)
-                        .execute())
+                .flatMapMany(conn1 -> conn1.inTransaction(
+                        conn2 -> conn2.createStatement("SELECT pg_sleep(0.04), firstname, lastname FROM card_clients WHERE guid = $1")
+                                .bind("$1", id)
+                                .execute()
+                ))
                 .flatMap(result -> result.map(Service::mapper))
                 .singleOrEmpty();
 
-        return client.flatMap(data -> ServerResponse.ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(client, Client.class))
+        return client.flatMap(data -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(Mono.just(data), Client.class))
                 .switchIfEmpty(ServerResponse.noContent().build())
                 .onErrorResume(TimeoutException.class::isInstance,
                         throwable -> ServerResponse.status(HttpStatus.REQUEST_TIMEOUT).build());
@@ -82,10 +82,12 @@ public class Service {
     public Mono<ServerResponse> getAllClients(ServerRequest request) {
         var clients = database.getConnection()
                 .switchIfEmpty(Mono.error(IllegalArgumentException::new))
-                .flatMapMany(conn -> conn.createStatement("SELECT firstname, lastname FROM card_clients")
-                        .execute())
+                .flatMapMany(conn1 -> conn1.inTransaction(
+                        conn2 -> conn2.createStatement("SELECT firstname, lastname FROM card_clients")
+                                .execute()
+                ))
                 .flatMap(result -> result.map(Service::mapper))
-                .filter(Client::isNull);
+                .filter(Client::isNotNull);
 
         return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_STREAM_JSON)

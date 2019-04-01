@@ -28,11 +28,9 @@
 package reactor;
 
 import io.r2dbc.spi.ConnectionFactory;
-import java.util.Objects;
+import io.r2dbc.spi.Result;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import org.reactivestreams.Publisher;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -40,51 +38,24 @@ import reactor.core.publisher.Mono;
  */
 public class Connection {
 
+    private Database database;
     private io.r2dbc.spi.Connection delegate;
 
-    private Connection(io.r2dbc.spi.Connection delegate) {
+    private Connection(Database database, io.r2dbc.spi.Connection delegate) {
+        this.database = database;
         this.delegate = delegate;
     }
 
-    public static Mono<Connection> create(ConnectionFactory factory) {
-        return Mono.from(factory.create()).map(Connection::new);
+    public static Mono<Connection> create(Database database, ConnectionFactory factory) {
+        return Mono.from(factory.create()).map(delegate -> new Connection(database, delegate));
     }
 
-    public Flux<io.r2dbc.spi.Result> inTransaction(Function<io.r2dbc.spi.Connection, Flux<io.r2dbc.spi.Result>> handler) {
+    public Publisher<? extends Result> inTransaction(Function<io.r2dbc.spi.Connection, Publisher<? extends  Result>> handler) {
         return Mono.from(delegate.beginTransaction())
                 .thenMany(handler.apply(delegate))
-                .concatWith(typeSafe(delegate::commitTransaction))
-                .onErrorResume(appendError(delegate::rollbackTransaction));
-    }
-
-    /**
-     * Convert a {@code Publisher<Void>} to a {@code Publisher<T>} allowing for type passthrough behavior.
-     *
-     * @param supplier a {@link Supplier} of a {@link Publisher} to execute
-     * @param <T> the type passing through the flow
-     * @return {@link Mono#empty()} of the appropriate type
-     */
-    private static <T> Mono<T> typeSafe(Supplier<Publisher<Void>> supplier) {
-        Objects.requireNonNull(supplier, "supplier must not be null");
-
-        return Flux.from(supplier.get()).then(Mono.empty());
-    }
-
-    /**
-     * Execute the {@link Publisher} provided by a {@link Supplier} and propagate the error that initiated this behavior.
-     * Typically used with {@link Flux#onErrorResume(Function)} and
-     * {@link Mono#onErrorResume(Function)}.
-     *
-     * @param supplier a {@link Supplier} of a {@link Publisher} to execute when an error occurs
-     * @param <T> the type passing through the flow
-     * @return a {@link Mono#error(Throwable)} with the original error
-     * @see Flux#onErrorResume(Function)
-     * @see Mono#onErrorResume(Function)
-     */
-    private static <T> Function<Throwable, Mono<T>> appendError(Supplier<Publisher<?>> supplier) {
-        Objects.requireNonNull(supplier, "supplier must not be null");
-
-        return throwable -> Flux.from(supplier.get()).then(Mono.error(throwable));
+                .concatWith(Misc.typeSafe(delegate::commitTransaction))
+                .onErrorResume(Misc.appendError(delegate::rollbackTransaction))
+                .doFinally(signalType -> database.releaseConnection(this));
     }
 
 }

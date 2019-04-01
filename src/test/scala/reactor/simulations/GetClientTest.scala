@@ -58,10 +58,10 @@ object Scenario {
     .repeat(loopCount)(doGetClient)
 }
 
-class ProcessPurchaseTest extends Simulation {
+class GetClientTest extends Simulation {
 
   private val injectionSteps = Seq(
-    constantUsersPerSec(100) during (60 seconds)
+    constantUsersPerSec(300) during (60 seconds)
   )
 
   private val assertions = Seq(

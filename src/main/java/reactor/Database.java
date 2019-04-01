@@ -29,12 +29,12 @@ package reactor;
 
 import io.r2dbc.postgresql.PostgresqlConnectionConfiguration;
 import io.r2dbc.postgresql.PostgresqlConnectionFactory;
-import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactory;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoSink;
@@ -46,11 +46,12 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class Database {
 
-    static final int KEEP_ALIVE_CONNECTIONS = 2;
+    static final int KEEP_ALIVE_CONNECTIONS = 4;
     static final int CONNECTION_TIMEOUT = 3; // seconds
 
     private final Semaphore establishedConnectionSemaphore = new Semaphore(KEEP_ALIVE_CONNECTIONS);
     private final ConcurrentLinkedQueue<Connection> establishedConnectionPool = new ConcurrentLinkedQueue<>();
+    private final AtomicBoolean connectionTimedOut = new AtomicBoolean(true);
 
     private ConnectionFactory connectionFactory;
 
@@ -58,46 +59,51 @@ public class Database {
         log.warn("creating psql connection...");
 
         connectionFactory = new PostgresqlConnectionFactory(PostgresqlConnectionConfiguration.builder()
-                .host("172.29.17.203")
+                .host("172.29.17.40")
                 .username("postgres")
                 .password("postgres")
                 .database("set")
                 .build());
+
+        for (int i = 0; i < KEEP_ALIVE_CONNECTIONS; ++i) {
+            establishedConnectionPool.add(Connection.create(this, connectionFactory).block());
+        }
     }
 
     public Mono<Connection> getConnection() {
         return obtainConnectionNonBlocking()
-                .switchIfEmpty(obtainConnectionBlocking())
-                //.flatMap(c -> Mono.just(c.beginTransaction()).<Connection>then(c))
-                .doOnNext(this::releaseConnection);
+                .switchIfEmpty(obtainConnectionBlocking());
     }
 
 
     private Mono<Connection> obtainConnectionNonBlocking() {
-        //log.warn("try obtain connection...");
-        if (establishedConnectionSemaphore.tryAcquire()) {
-            //log.warn("connection acquired at once");
-            return Mono.justOrEmpty(establishedConnectionPool.poll())
-                    .switchIfEmpty(Mono.from(connectionFactory.create()));
-        } else {
-            return Mono.empty();
-        }
+        return Mono.create(this::getConnectionAtOnce);
     }
 
     private Mono<Connection> obtainConnectionBlocking() {
         return Mono.create(this::waitForConnectionRelease)
-                .subscribeOn(Schedulers.single())
-                .publishOn(Schedulers.parallel());
+                .subscribeOn(Schedulers.elastic());
+    }
+
+    private void getConnectionAtOnce(MonoSink<Connection> sink) {
+        if (establishedConnectionSemaphore.tryAcquire()) {
+            Connection connection = establishedConnectionPool.poll();
+            sink.success(connection);
+        } else {
+            sink.success();
+        }
     }
 
     private void waitForConnectionRelease(MonoSink<Connection> sink) {
         try {
-            log.warn("waiting for connection...");
-            if (establishedConnectionSemaphore.tryAcquire(CONNECTION_TIMEOUT, TimeUnit.SECONDS)) {
-                log.warn("connection acquired");
+            if (establishedConnectionSemaphore.tryAcquire() ||
+                    (/*connectionTimedOut.get() &&*/establishedConnectionSemaphore.tryAcquire(CONNECTION_TIMEOUT, TimeUnit.SECONDS))) {
+                log.warn("connection got!");
+                connectionTimedOut.compareAndSet(false, true);
                 sink.success(establishedConnectionPool.poll());
             } else {
                 log.warn("connection timed out");
+                connectionTimedOut.compareAndSet(true, false);
                 sink.error(new TimeoutException());
             }
         } catch (InterruptedException e) {
@@ -105,10 +111,9 @@ public class Database {
         }
     }
 
-    private void releaseConnection(Connection connection) {
+    void releaseConnection(Connection connection) {
         establishedConnectionPool.offer(connection);
         establishedConnectionSemaphore.release();
-        //log.warn("connection released");
     }
 
 }

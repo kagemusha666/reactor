@@ -39,8 +39,8 @@ public class Client {
     String firstName;
     String lastName;
 
-    boolean isNull() {
-        return firstName == null && lastName == null;
+    boolean isNotNull() {
+        return firstName != null && lastName != null;
     }
 
     static Client NullClient() {
