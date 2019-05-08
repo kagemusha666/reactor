@@ -27,10 +27,13 @@
 
 package reactor.simulations
 
+import com.typesafe.config.ConfigFactory
+
 import io.gatling.core.Predef._
 import io.gatling.core.structure.{ChainBuilder, ScenarioBuilder}
 import io.gatling.http.Predef._
 import io.gatling.http.protocol.HttpProtocolBuilder
+import io.gatling.jdbc.Predef._
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -38,20 +41,26 @@ import scala.language.postfixOps
 
 object Scenario {
 
-  val clientId = Iterator.continually(Map("id" -> "2222"))
+  val config = ConfigFactory.load().getConfig("postgres").getConfig("properties")
+  val host = config.getString("serverName")
+  val user = config.getString("user")
+  val password = config.getString("password")
+
+  val clientId = jdbcFeeder(s"jdbc:postgresql://$host/set", user, password,
+    s"SELECT guid FROM card_clients WHERE firstname IS NOT NULL AND lastname IS NOT NULL").circular
 
   val doGetClient: ChainBuilder =
     feed(clientId)
       .group("Client") {
         exec(
           http("ClientRequest")
-            .get("/client/" + "${id}")
+            .get("/client/" + "${guid}")
             .check(status.is(200))
         )
       }
 
   val httpConf: HttpProtocolBuilder = http
-    .baseUrl("http://0.0.0.0:8080")
+    .baseUrl("http://localhost:8080")
     .header(HttpHeaderNames.ContentType, HttpHeaderValues.ApplicationJson)
 
   def getClientScn(loopCount: Int = 1): ScenarioBuilder = scenario("DoRequestClient")
@@ -61,11 +70,11 @@ object Scenario {
 class GetClientTest extends Simulation {
 
   private val injectionSteps = Seq(
-    constantUsersPerSec(300) during (60 seconds)
+    constantUsersPerSec(60) during (60 seconds)
   )
 
   private val assertions = Seq(
-    details("Client").responseTime.max.lt(6000),
+    details("Client").responseTime.max.lt(3000),
   )
 
   setUp(Scenario.getClientScn().inject(injectionSteps).protocols(Scenario.httpConf)).assertions(assertions)
